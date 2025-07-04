@@ -1,6 +1,5 @@
 import { validationResult } from 'express-validator';
 import jwt from 'jsonwebtoken';
-import { otpService } from '../services/otpService.js';
 import { smsService } from '../services/smsService.js';
 import logger from '../config/logger.js';
 
@@ -18,12 +17,8 @@ export const sendOTP = async (req, res) => {
 
     const { phoneNumber } = req.body;
     
-    // Generate and store OTP
-    const otp = otpService.generateOTP();
-    otpService.storeOTP(phoneNumber, otp);
-    
-    // Send OTP via SMS
-    const smsResult = await smsService.sendOTP(phoneNumber, otp);
+    // Send OTP via Twilio Verify service (no local OTP generation/storage)
+    const smsResult = await smsService.sendOTP(phoneNumber);
     
     if (!smsResult.success) {
       return res.status(500).json({
@@ -62,8 +57,18 @@ export const verifyOTP = async (req, res) => {
 
     const { phoneNumber, otp } = req.body;
     
-    // Verify OTP
-    const isValid = otpService.verifyOTP(phoneNumber, otp);
+    // Verify OTP using Twilio Verify service
+    let isValid = false;
+    
+    if (smsService.isDevelopment) {
+      // Mock verification for development
+      isValid = true;
+      logger.info(`[MOCK] OTP verified for ${phoneNumber} in development mode`);
+    } else {
+      // Production Twilio Verify verification
+      const verifyResult = await smsService.verifyTwilioOTP(phoneNumber, otp);
+      isValid = verifyResult.success;
+    }
     
     if (!isValid) {
       return res.status(400).json({
@@ -78,9 +83,6 @@ export const verifyOTP = async (req, res) => {
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN || '24h' }
     );
-    
-    // Clean up OTP
-    otpService.clearOTP(phoneNumber);
     
     logger.info(`User authenticated: ${phoneNumber}`);
     
